@@ -1,0 +1,4 @@
+[submodule "inventory/limak8s"]
+	path = inventory/limak8s
+	url = git@github.com:aesca1er/kubespray-inventory-lima
+	branch = master
