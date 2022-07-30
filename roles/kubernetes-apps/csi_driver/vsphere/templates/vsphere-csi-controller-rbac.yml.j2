@@ -40,8 +40,7 @@ rules:
     verbs: ["get", "list", "watch"]
   - apiGroups: ["storage.k8s.io"]
     resources: ["volumeattachments"]
-    verbs: ["get", "list", "watch", "patch"]
-{% if external_vsphere_version >= "7.0u1" %}
+    verbs: ["get", "list", "watch", "patch", "update"]
   - apiGroups: ["cns.vmware.com"]
     resources: ["triggercsifullsyncs"]
     verbs: ["create", "get", "update", "watch", "list"]
@@ -57,7 +56,6 @@ rules:
   - apiGroups: [ "cns.vmware.com" ]
     resources: [ "csinodetopologies" ]
     verbs: ["get", "update", "watch", "list"]
-{% endif %}
   - apiGroups: ["storage.k8s.io"]
     resources: ["volumeattachments/status"]
     verbs: ["patch"]

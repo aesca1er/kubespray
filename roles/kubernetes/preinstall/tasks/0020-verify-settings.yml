@@ -24,7 +24,7 @@
 
 - name: Stop if unknown OS
   assert:
-    that: ansible_distribution in ['RedHat', 'CentOS', 'Fedora', 'Ubuntu', 'Debian', 'Flatcar', 'Flatcar Container Linux by Kinvolk', 'Suse', 'openSUSE Leap', 'ClearLinux', 'OracleLinux', 'AlmaLinux', 'Rocky', 'Amazon']
+    that: ansible_distribution in ['RedHat', 'CentOS', 'Fedora', 'Ubuntu', 'Debian', 'Flatcar', 'Flatcar Container Linux by Kinvolk', 'Suse', 'openSUSE Leap', 'openSUSE Tumbleweed', 'ClearLinux', 'OracleLinux', 'AlmaLinux', 'Rocky', 'Amazon']
     msg: "{{ ansible_distribution }} is not a known OS"
   when: not ignore_assert_errors
 
@@ -34,44 +34,6 @@
     msg: "{{ kube_network_plugin }} is not supported"
   when:
     - kube_network_plugin is defined
-    - not ignore_assert_errors
-
-- name: Stop if legacy encapsulation variables are detected (ipip)
-  assert:
-    that:
-      - ipip is not defined
-    msg: "'ipip' configuration variable is deprecated, please configure your inventory with 'calico_ipip_mode' set to 'Always' or 'CrossSubnet' according to your specific needs"
-  when:
-    - kube_network_plugin == 'calico'
-    - not ignore_assert_errors
-
-- name: Stop if legacy encapsulation variables are detected (ipip_mode)
-  assert:
-    that:
-      - ipip_mode is not defined
-    msg: "'ipip_mode' configuration variable is deprecated, please configure your inventory with 'calico_ipip_mode' set to 'Always' or 'CrossSubnet' according to your specific needs"
-  when:
-    - kube_network_plugin == 'calico'
-    - not ignore_assert_errors
-
-- name: Stop if incompatible network plugin and cloudprovider
-  assert:
-    that:
-      - calico_ipip_mode == 'Never'
-      - calico_vxlan_mode in ['Always', 'CrossSubnet']
-    msg: "When using cloud_provider azure and network_plugin calico calico_ipip_mode must be 'Never' and calico_vxlan_mode 'Always' or 'CrossSubnet'"
-  when:
-    - cloud_provider is defined and cloud_provider == 'azure'
-    - kube_network_plugin == 'calico'
-    - not ignore_assert_errors
-
-- name: Stop if supported Calico versions
-  assert:
-    that:
-      - "calico_version in calico_crds_archive_checksums.keys()"
-    msg: "Calico version not supported {{ calico_version }} not in {{ calico_crds_archive_checksums.keys() }}"
-  when:
-    - kube_network_plugin == 'calico'
     - not ignore_assert_errors
 
 - name: Stop if unsupported version of Kubernetes
@@ -115,16 +77,6 @@
     - not ignore_assert_errors
     - inventory_hostname in groups['kube_node']
 
-- name: Stop when dynamic_kubelet_configuration enabled for kubernetes >= 1.22
-  assert:
-    that: not dynamic_kubelet_configuration
-    msg: >
-      Feature DynamicKubeletConfig is deprecated in 1.22 and will not move to GA.
-      It is planned to be removed from Kubernetes in the version 1.23.
-      Please use alternative ways to update kubelet configuration.
-  when:
-    - kube_version is version('v1.22.0', '>=')
-
 # This assertion will fail on the safe side: One can indeed schedule more pods
 # on a node than the CIDR-range has space for when additional pods use the host
 # network namespace. It is impossible to ascertain the number of such pods at
@@ -142,8 +94,8 @@
 
 - name: Stop if ip var does not match local ips
   assert:
-    that: ip in ansible_all_ipv4_addresses
-    msg: "'{{ ansible_all_ipv4_addresses }}' do not contain '{{ ip }}'"
+    that: (ip in ansible_all_ipv4_addresses) or (ip in ansible_all_ipv6_addresses)
+    msg: "IPv4: '{{ ansible_all_ipv4_addresses }}' and IPv6: '{{ ansible_all_ipv6_addresses }}' do not contain '{{ ip }}'"
   when:
     - not ignore_assert_errors
     - ip is defined
@@ -167,13 +119,6 @@
     that: rbac_enabled
   when:
     - cloud_provider is defined and cloud_provider == "oci"
-    - not ignore_assert_errors
-
-- name: Stop if RBAC and anonymous-auth are not enabled when insecure port is disabled
-  assert:
-    that: rbac_enabled and kube_api_anonymous_auth
-  when:
-    - kube_apiserver_insecure_port == 0 and inventory_hostname in groups['kube_control_plane']
     - not ignore_assert_errors
 
 - name: Stop if kernel version is too low
@@ -200,53 +145,6 @@
     - cloud-provider
     - facts
 
-- name: Get current calico cluster version
-  shell: "set -o pipefail && {{ bin_dir }}/calicoctl.sh version  | grep 'Cluster Version:' | awk '{ print $3}'"
-  args:
-    executable: /bin/bash
-  register: calico_version_on_server
-  async: 10
-  poll: 3
-  run_once: yes
-  changed_when: false
-  failed_when: false
-  when:
-    - kube_network_plugin == 'calico'
-
-- name: Check that current calico version is enough for upgrade
-  assert:
-    that:
-      - calico_version_on_server.stdout is version(calico_min_version_required, '>=')
-    msg: >
-      Your version of calico is not fresh enough for upgrade.
-      Minimum version is {{ calico_min_version_required }} supported by the previous kubespray release.
-  when:
-    - kube_network_plugin == 'calico'
-    - 'calico_version_on_server.stdout is defined'
-    - calico_version_on_server.stdout
-    - inventory_hostname == groups['kube_control_plane'][0]
-  run_once: yes
-
-- name: "Check that cluster_id is set if calico_rr enabled"
-  assert:
-    that:
-      - cluster_id is defined
-    msg: "A unique cluster_id is required if using calico_rr"
-  when:
-    - kube_network_plugin == 'calico'
-    - peer_with_calico_rr
-    - inventory_hostname == groups['kube_control_plane'][0]
-  run_once: yes
-
-- name: "Check that calico_rr nodes are in k8s_cluster group"
-  assert:
-    that:
-      - '"k8s_cluster" in group_names'
-    msg: "calico_rr must be a child group of k8s_cluster group"
-  when:
-    - kube_network_plugin == 'calico'
-    - '"calico_rr" in group_names'
-
 - name: "Check that kube_service_addresses is a network range"
   assert:
     that:
@@ -266,6 +164,13 @@
     that:
       - kube_pods_subnet | ipaddr(kube_service_addresses) | string == 'None'
     msg: "kube_pods_subnet cannot be the same network segment as kube_service_addresses"
+  run_once: yes
+
+- name: "Check that IP range is enough for the nodes"
+  assert:
+    that:
+      - 2 ** (kube_network_node_prefix - kube_pods_subnet | ipaddr('prefix')) >= groups['k8s_cluster'] | length
+    msg: "Not enough IPs are available for the desired node count."
   run_once: yes
 
 - name: Stop if unknown dns mode
@@ -302,6 +207,12 @@
   when:
     - inventory_hostname in groups.get('etcd',[])
 
+- name: Stop if container manager is not docker, crio or containerd
+  assert:
+    that: container_manager in ['docker', 'crio', 'containerd']
+    msg: "The container manager, 'container_manager', must be docker, crio or containerd"
+  run_once: true
+
 - name: Stop if etcd deployment type is not host or kubeadm when container_manager != docker
   assert:
     that: etcd_deployment_type in ['host', 'kubeadm']
@@ -320,7 +231,7 @@
           You can set `etcd_deployment_type` to `kubeadm` instead of setting `etcd_kubeadm_enabled` to `true`."
       changed_when: true
 
-    - name: Stop if `etcd_kubeadm_enabled` is defined and `etcd_deployment_type` is not `kubadm` or `host`
+    - name: Stop if `etcd_kubeadm_enabled` is defined and `etcd_deployment_type` is not `kubeadm` or `host`
       assert:
         that: etcd_deployment_type == 'kubeadm'
         msg: >
@@ -341,12 +252,6 @@
     that: container_manager != 'docker'
     msg: "kata_containers_enabled support only for containerd and crio-o. See https://github.com/kata-containers/documentation/blob/1.11.4/how-to/run-kata-with-k8s.md#install-a-cri-implementation for details"
   when: kata_containers_enabled
-
-- name: Stop if kata_containers_version is >= 2.3.0 and kube_version < 1.22.0
-  assert:
-    that: kube_version is version('v1.22.0', '>')
-    msg: "Kata containers version 2.3.0 is compatible with Kubernetes 1.22.0+"
-  when: kata_containers_version is version ('2.3.0', '>=')
 
 - name: Stop if gvisor_enabled is enabled when container_manager is not containerd
   assert:
